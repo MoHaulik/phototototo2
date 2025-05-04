@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WebXR Photo Gallery</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f2f2f7;
+      color: #1c1c1e;
+      overflow-x: hidden;
+    }
+
+    .header {
+      background-color: rgba(255, 255, 255, 0.92);
+      position: sticky;
+      top: 0;
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+      z-index: 2000;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .enter-ar-button {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 24px;
+      background: rgba(0, 122, 255, 0.9);
+      color: #fff;
+      border: none;
+      border-radius: 30px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 1000;
+    }
+
+    .enter-ar-button:hover {
+      background: rgba(0, 122, 255, 1);
+      transform: translateX(-50%) translateY(-2px);
+      box-shadow: 0 6px 16px rgba(0, 122, 255, 0.4);
+    }
+
+    .ar-icon {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+    }
+
+    .gallery-container {
+      padding: 10px;
+      max-width: 1200px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1000;
+    }
+
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 8px;
+      padding: 4px;
+    }
+
+    @media (min-width: 768px) {
+      .gallery-grid {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+      }
+    }
+
+    .photo-item {
+      position: relative;
+      padding-bottom: 100%;
+      overflow: hidden;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      transition: transform 0.2s, box-shadow 0.2s;
+      background-color: #e0e0e0;
+    }
+
+    .photo-item:hover {
+      transform: scale(1.02);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .photo-item.selected {
+      outline: 3px solid rgba(0, 122, 255, 0.8);
+    }
+
+    .photo-item img {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #xr-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2000;
+      pointer-events: none;
+      display: none;
+    }
+
+    .exit-ar {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(255, 255, 255, 0.25);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      cursor: pointer;
+      backdrop-filter: blur(5px);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+      z-index: 2001;
+      pointer-events: auto;
+    }
+
+    .xr-active .exit-ar {
+      display: flex;
+    }
+
+    #status {
+      position: fixed;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 24px;
+      font-size: 16px;
+      font-weight: 500;
+      text-align: center;
+      display: none;
+      z-index: 2001;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <header class="header"><h1>Photo Gallery</h1></header>
+  <div class="gallery-container">
+    <div id="photo-grid" class="gallery-grid"></div>
+  </div>
+  <div id="xr-overlay"></div>
+  <button id="enter-ar" class="enter-ar-button">
+    <svg class="ar-icon" viewBox="0 0 24 24">
+      <path d="M21 4H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM3 16V6h18v10H3z"></path>
+      <path d="M6 12s.5-2 3-2 3 2 3 2"></path>
+      <path d="M15 13l2-3 2 3"></path>
+    </svg>
+    Enter AR Gallery
+  </button>
+  <button id="exit-ar" class="exit-ar">×</button>
+  <div id="status"></div>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.150.1/build/three.module.js';
+
+    // Photo Gallery Data
+    const photoURLs = [
+      './Photo/photo1.jpg',
+      './Photo/photo2.jpg',
+      './Photo/photo3.jpg',
+      './Photo/photo4.jpg',
+      './Photo/photo5.jpg'
+    ];
+
+    // WebXR variables
+    let camera, scene, renderer, xrSession;
+    let selectedPhotoIndices = [];
+    let controllers = [], activeControllers = new Set();
+    let selectedPhoto = null, interactionMode = 'none';
+    let initialPositions = {}, initialDistance = 0, initialScale = new THREE.Vector3(), initialRotation = 0;
+    let photoFrames = [];
+
+    // Initialize photo grid
+    function initPhotoGrid() {
+      const grid = document.getElementById('photo-grid');
+      photoURLs.forEach((url, index) => {
+        const item = document.createElement('div');
+        item.className = 'photo-item';
+        item.dataset.index = index;
+        
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = `Photo ${index + 1}`;
+        img.loading = 'lazy';
+        
+        item.appendChild(img);
+        grid.appendChild(item);
+        
+        // Add click event to each photo
+        item.addEventListener('click', () => {
+          togglePhotoSelection(item, index);
+        });
+      });
+    }
+
+    function togglePhotoSelection(item, index) {
+      item.classList.toggle('selected');
+      
+      const isSelected = item.classList.contains('selected');
+      
+      if (isSelected && !selectedPhotoIndices.includes(index)) {
+        selectedPhotoIndices.push(index);
+      } else if (!isSelected && selectedPhotoIndices.includes(index)) {
+        selectedPhotoIndices = selectedPhotoIndices.filter(i => i !== index);
+      }
+    }
+
+    function initXR() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
+      
+      renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      document.getElementById('xr-overlay').appendChild(renderer.domElement);
+      
+      // Lighting
+      scene.add(new THREE.AmbientLight(0x404040, 2));
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+      dirLight.position.set(1, 1, 1);
+      dirLight.castShadow = true;
+      scene.add(dirLight);
+      
+      // Handle window resize
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth/window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+    }
+
+    function setupControllers() {
+      for (let i = 0; i < 2; i++) {
+        const ctrl = renderer.xr.getController(i);
+        ctrl.userData.id = i;
+        
+        // Add visual representation for controllers
+        addHandVisual(ctrl, i === 0 ? 0x6699ff : 0xff6666);
+        
+        ctrl.addEventListener('selectstart', onSelectStart);
+        ctrl.addEventListener('selectend', onSelectEnd);
+        scene.add(ctrl);
+        controllers.push(ctrl);
+      }
+    }
+    
+    function addHandVisual(controller, color) {
+      // Simple sphere to represent hand position
+      const handGeometry = new THREE.SphereGeometry(0.025, 16, 16);
+      const handMaterial = new THREE.MeshStandardMaterial({
+        color: color,
+        roughness: 0.3,
+        metalness: 0.5,
+        transparent: true,
+        opacity: 0.7
+      });
+      const handMesh = new THREE.Mesh(handGeometry, handMaterial);
+      controller.add(handMesh);
+    }
+
+    function onSelectStart(e) {
+      const controller = e.target;
+      const id = controller.userData.id;
+      activeControllers.add(id);
+      
+      if (interactionMode === 'none') {
+        // Try to find a photo to interact with
+        const controllerPos = new THREE.Vector3();
+        controller.getWorldPosition(controllerPos);
+        const hit = findIntersectedPhoto(controllerPos);
+        
+        if (hit) {
+          selectedPhoto = hit;
+          interactionMode = 'move';
+          highlightPhoto(selectedPhoto, true);
+          
+          // Store initial controller position
+          initialPositions[id] = controllerPos.clone();
+          
+          // Calculate offset from controller to photo center
+          selectedPhoto.userData.offset = new THREE.Vector3().subVectors(
+            selectedPhoto.position,
+            controllerPos
+          );
+          
+          updateStatus('Moving photo. Use both hands to resize/rotate.');
+        }
+      } 
+      else if (interactionMode === 'move' && activeControllers.size === 2) {
+        // Transition to transform mode (scale/rotate)
+        interactionMode = 'transform';
+        
+        // Store positions of both controllers
+        controllers.forEach(c => {
+          const pos = new THREE.Vector3();
+          c.getWorldPosition(pos);
+          initialPositions[c.userData.id] = pos.clone();
+        });
+        
+        // Store initial values for transform operations
+        initialDistance = getControllerDistance();
+        initialScale.copy(selectedPhoto.scale);
+        
+        // Calculate initial angle between controllers (for rotation)
+        const [pos0, pos1] = [initialPositions[0], initialPositions[1]];
+        if (pos0 && pos1) {
+          const vector = new THREE.Vector3().subVectors(pos1, pos0);
+          initialRotation = Math.atan2(vector.x, vector.z);
+        }
+        
+        updateStatus('Resize/rotate mode active.');
+      }
+    }
+
+    function onSelectEnd(e) {
+      const id = e.target.userData.id;
+      activeControllers.delete(id);
+      
+      if (interactionMode === 'transform' && activeControllers.size < 2) {
+        // Drop back to move if we were in transform and now have fewer than 2 controllers
+        interactionMode = 'move';
+        
+        if (activeControllers.size === 1) {
+          // Recalculate offset for the remaining controller
+          const remainingId = Array.from(activeControllers)[0];
+          const controller = controllers[remainingId];
+          const pos = new THREE.Vector3();
+          controller.getWorldPosition(pos);
+          
+          // Update the offset
+          selectedPhoto.userData.offset = new THREE.Vector3().subVectors(
+            selectedPhoto.position,
+            pos
+          );
+          
+          updateStatus('Transform complete. Still moving photo.');
+        } else {
+          resetInteraction();
+        }
+      }
+      else if (interactionMode === 'move' && activeControllers.size === 0) {
+        resetInteraction();
+      }
+    }
+    
+    function resetInteraction() {
+      if (selectedPhoto) {
+        highlightPhoto(selectedPhoto, false);
+      }
+      
+      selectedPhoto = null;
+      interactionMode = 'none';
+      activeControllers.clear();
+      initialPositions = {};
+      updateStatus('Photo placed. Select again to move.');
+    }
+    
+    function highlightPhoto(photo, isHighlighted) {
+      // Apply visual feedback to the border frame
+      if (photo.children && photo.children.length > 1) {
+        const borderFrame = photo.children[1]; // Access the border frame
+        if (borderFrame.material) {
+          if (isHighlighted) {
+            borderFrame.material.color.set(0x0066ff);
+            borderFrame.material.emissive = new THREE.Color(0x0066ff);
+            borderFrame.material.emissiveIntensity = 0.5;
+          } else {
+            borderFrame.material.color.set(0xffffff);
+            borderFrame.material.emissiveIntensity = 0;
+          }
+        }
+      }
+    }
+
+    function findIntersectedPhoto(controllerPos) {
+      // Find the closest photo within interaction distance
+      let closestPhoto = null;
+      let closestDistance = 0.2; // Max interaction distance
+      
+      photoFrames.forEach(photoFrame => {
+        const distance = controllerPos.distanceTo(photoFrame.position);
+        
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestPhoto = photoFrame;
+        }
+      });
+      
+      return closestPhoto;
+    }
+
+    function getControllerDistance() {
+      // Calculate distance between controllers
+      if (controllers.length < 2) return 0;
+      
+      const pos0 = new THREE.Vector3();
+      const pos1 = new THREE.Vector3();
+      
+      controllers[0].getWorldPosition(pos0);
+      controllers[1].getWorldPosition(pos1);
+      
+      return pos0.distanceTo(pos1);
+    }
+
+    function handleInteraction() {
+      if (!selectedPhoto) return;
+      
+      try {
+        // Handle move interaction with a single controller
+        if (interactionMode === 'move' && activeControllers.size === 1) {
+          const controllerId = Array.from(activeControllers)[0];
+          const controller = controllers[controllerId];
+          
+          const controllerPos = new THREE.Vector3();
+          controller.getWorldPosition(controllerPos);
+          
+          // Update position based on controller movement with the saved offset
+          if (selectedPhoto.userData.offset) {
+            selectedPhoto.position.copy(controllerPos).add(selectedPhoto.userData.offset);
+          }
+        }
+        // Handle transform (resize & rotate) with two controllers
+        else if (interactionMode === 'transform' && activeControllers.size === 2) {
+          // Get current controller positions
+          const currentPositions = [];
+          controllers.forEach(controller => {
+            const pos = new THREE.Vector3();
+            controller.getWorldPosition(pos);
+            currentPositions[controller.userData.id] = pos;
+          });
+          
+          // Calculate current distance for scaling
+          const currentDistance = getControllerDistance();
+          
+          // Scale photo based on change in distance
+          if (initialDistance > 0) {
+            let scaleFactor = currentDistance / initialDistance;
+            
+            // Limit scale factor to reasonable ranges
+            scaleFactor = Math.max(0.5, Math.min(scaleFactor, 3.0));
+            
+            selectedPhoto.scale.copy(initialScale).multiplyScalar(scaleFactor);
+          }
+          
+          // Handle rotation - calculate angle between controllers
+          const pos0 = currentPositions[0];
+          const pos1 = currentPositions[1];
+          
+          if (pos0 && pos1) {
+            const vector = new THREE.Vector3().subVectors(pos1, pos0);
+            const currentAngle = Math.atan2(vector.x, vector.z);
+            
+            // Calculate rotation delta from initial angle
+            const rotationDelta = currentAngle - initialRotation;
+            
+            // Rotate around Y-axis (vertical)
+            selectedPhoto.rotation.y = selectedPhoto.userData.originalRotation?.y || 0;
+            selectedPhoto.rotation.y += rotationDelta;
+          }
+        }
+      } catch (error) {
+        console.error('Error in photo interaction:', error);
+        resetInteraction();
+      }
+    }
+
+    function startARSession() {
+      if (!navigator.xr) return updateStatus('WebXR not supported');
+      
+      navigator.xr.isSessionSupported('immersive-ar').then(supported => {
+        if (!supported) return updateStatus('AR not supported');
+        
+        navigator.xr.requestSession('immersive-ar', { 
+          requiredFeatures: ['hit-test'],
+          optionalFeatures: ['dom-overlay'], 
+          domOverlay: { root: document.body } 
+        })
+        .then(session => {
+          xrSession = session;
+          renderer.xr.setReferenceSpaceType('local');
+          renderer.xr.setSession(session);
+          document.body.classList.add('xr-active');
+          document.getElementById('xr-overlay').style.display = 'block';
+          
+          setupControllers();
+          createPhotosInAR();
+          
+          session.addEventListener('end', endARSession);
+          renderer.setAnimationLoop(animate);
+          
+          updateStatus('AR mode active. Grab photos to move them.');
+        })
+        .catch(err => {
+          console.error('Error starting AR session:', err);
+          updateStatus('Failed to start AR: ' + err.message);
+        });
+      });
+    }
+
+    function endARSession() {
+      if (!xrSession) return;
+      
+      xrSession.end();
+      xrSession = null;
+      renderer.setAnimationLoop(null);
+      document.body.classList.remove('xr-active');
+      document.getElementById('xr-overlay').style.display = 'none';
+      
+      // Clear scene and reset state
+      clearScene();
+      photoFrames = [];
+      controllers = [];
+      activeControllers.clear();
+      selectedPhoto = null;
+      interactionMode = 'none';
+      
+      updateStatus('');
+    }
+    
+    function clearScene() {
+      // Remove all objects from scene except lights
+      const objectsToRemove = [];
+      scene.traverse((obj) => {
+        if (obj.userData.isPhoto || obj.type === 'Mesh') {
+          objectsToRemove.push(obj);
+        }
+      });
+      
+      objectsToRemove.forEach(obj => {
+        if (obj.parent) {
+          obj.parent.remove(obj);
+        }
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach(m => m.dispose());
+          } else {
+            obj.material.dispose();
+          }
+        }
+      });
+    }
+
+    function createPhotosInAR() {
+      // If no photos are selected, show all photos
+      const indicesToShow = selectedPhotoIndices.length > 0 ? 
+        selectedPhotoIndices : 
+        photoURLs.map((_, i) => i);
+      
+      if (indicesToShow.length === 0) {
+        updateStatus('No photos selected. Select some photos first!');
+        return;
+      }
+      
+      // Create photos in AR
+      indicesToShow.forEach((index, i) => {
+        const url = photoURLs[index];
+        createPhotoFrameInAR(url, index, i);
+      });
+      
+      updateStatus('Photos placed. Grab with your hand to move.');
+    }
+    
+    function createPhotoFrameInAR(url, photoIndex, placementIndex) {
+      const loader = new THREE.TextureLoader();
+      
+      // Default dimensions
+      const width = 0.5;
+      const aspectRatio = 4/3;
+      const height = width / aspectRatio;
+      
+      // Create photo frame with placeholder material
+      const photoGeometry = new THREE.PlaneGeometry(width, height);
+      const placeholderMaterial = new THREE.MeshBasicMaterial({ 
+        color: 0xcccccc,
+        side: THREE.DoubleSide
+      });
+      
+      const photoFrame = new THREE.Mesh(photoGeometry, placeholderMaterial);
+      
+      // Create border frame
+      const borderWidth = 0.02;
+      const borderGeometry = new THREE.PlaneGeometry(width + borderWidth, height + borderWidth);
+      const borderMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        side: THREE.DoubleSide,
+        roughness: 0.7,
+        metalness: 0.3
+      });
+      
+      const borderFrame = new THREE.Mesh(borderGeometry, borderMaterial);
+      borderFrame.position.z = -0.001; // Slightly behind photo
+      
+      const photoWithFrame = new THREE.Group();
+      photoWithFrame.add(photoFrame);
+      photoWithFrame.add(borderFrame);
+      
+      // Position in a circle around the user
+      const angle = (Math.PI * 2 / (selectedPhotoIndices.length || photoURLs.length)) * placementIndex;
+      const radius = 0.8;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      
+      // Position in front of the user
+      photoWithFrame.position.set(x, 0, -z);
+      
+      // Make the photo face the user (center)
+      photoWithFrame.lookAt(0, 0, 0);
+      
+      photoWithFrame.userData = {
+        isPhoto: true,
+        photoIndex: photoIndex,
+        originalPosition: photoWithFrame.position.clone(),
+        originalRotation: photoWithFrame.rotation.clone(),
+        interactable: true
+      };
+      
+      photoFrames.push(photoWithFrame);
+      scene.add(photoWithFrame);
+      
+      // Add collision box for better interaction
+      const collisionGeometry = new THREE.BoxGeometry(width + 0.1, height + 0.1, 0.05);
+      const collisionMaterial = new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0.0 // Invisible
+      });
+      const collisionBox = new THREE.Mesh(collisionGeometry, collisionMaterial);
+      photoWithFrame.add(collisionBox);
+      
+      // Load the actual photo texture
+      loader.load(
+        url,
+        (texture) => {
+          try {
+            // Calculate proper aspect ratio from loaded texture
+            const imgAspectRatio = texture.image.width / texture.image.height;
+            const correctedHeight = width / imgAspectRatio;
+            
+            // Update geometry with correct aspect ratio
+            photoFrame.geometry.dispose();
+            photoFrame.geometry = new THREE.PlaneGeometry(width, correctedHeight);
+            borderFrame.geometry.dispose();
+            borderFrame.geometry = new THREE.PlaneGeometry(width + borderWidth, correctedHeight + borderWidth);
+            collisionBox.geometry.dispose();
+            collisionBox.geometry = new THREE.BoxGeometry(width + 0.1, correctedHeight + 0.1, 0.05);
+            
+            // Update material with loaded texture
+            photoFrame.material.dispose();
+            photoFrame.material = new THREE.MeshBasicMaterial({
+              map: texture,
+              side: THREE.DoubleSide
+            });
+          } catch (error) {
+            console.error('Error processing texture:', error);
+          }
+        },
+        undefined,
+        (error) => {
+          console.error('Error loading texture:', error);
+        }
+      );
+      
+      return photoWithFrame;
+    }
+
+    function animate(t, frame) {
+      if (frame) {
+        handleInteraction();
+      }
+      renderer.render(scene, camera);
+    }
+
+    function updateStatus(msg) {
+      const s = document.getElementById('status');
+      s.textContent = msg;
+      s.style.display = msg ? 'block' : 'none';
+      if (msg) {
+        clearTimeout(s._timer);
+        s._timer = setTimeout(() => { s.style.display = 'none'; }, 5000);
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      initPhotoGrid();
+      initXR();
+      document.getElementById('enter-ar').addEventListener('click', startARSession);
+      document.getElementById('exit-ar').addEventListener('click', endARSession);
+    });
+  </script>
+</body>
+</html>
